@@ -42,7 +42,7 @@ const messages = await query("messagesByDateRange", {
 ```
 
 ```js
-display(
+const selected = view(
   Inputs.table(messages, {
     columns: ["date_utc", "from_addr", "subject", "has_attachments"],
     header: {
@@ -51,9 +51,37 @@ display(
       subject: "Subject",
       has_attachments: "📎",
     },
+    multiple: false,
+    required: false,
   }),
 );
 ```
 
-Click a row's message ID below to load the full message (detail pane wiring
-is a next step — for now this confirms the query round-trip end to end).
+Select a row above (checkbox on the left) to load the full message below.
+
+```js
+const detail = selected ? await query("messageById", {messageId: selected.message_id}) : null;
+```
+
+```js
+display(
+  detail
+    ? html`<div style="border-top: 1px solid var(--theme-foreground-faint); padding-top: 1rem;">
+        <h3 style="margin-bottom: 0.25rem;">${detail.subject || "(no subject)"}</h3>
+        <p style="color: var(--theme-foreground-muted); margin-top: 0;">
+          <strong>From:</strong> ${detail.from_addr || "(unknown)"}<br>
+          <strong>To:</strong> ${detail.to_addr || "(unknown)"}<br>
+          <strong>Date:</strong> ${detail.date_utc ? new Date(detail.date_utc).toLocaleString() : "(unknown)"}
+        </p>
+        ${detail.attachments.length
+          ? html`<p><strong>Attachments:</strong> ${detail.attachments
+              .map((a) => `${a.filename || "(unnamed)"} (${Math.round((a.size_bytes || 0) / 1024)} KB)`)
+              .join(", ")}</p>`
+          : ""}
+        <pre style="white-space: pre-wrap; font-family: inherit;">${
+          detail.body_text || (detail.body_html ? "(HTML-only message — rendering raw HTML is not supported yet)" : "(no body)")
+        }</pre>
+      </div>`
+    : html`<p><em>No message selected.</em></p>`,
+);
+```
