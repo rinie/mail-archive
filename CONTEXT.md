@@ -11,7 +11,7 @@ compacts a file.
 
 ## Status
 
-Backend scaffolded and smoke-tested against real mbox data (2026-07-23):
+Backend scaffolded and the full real archive has been ingested (2026-07-23):
 
 - `backend/ingest/discoverMboxFiles.js`, `mboxParser.js`, `ingestState.js`,
   `attachmentStore.js`, `runIngest.js` — implemented and working.
@@ -19,10 +19,21 @@ Backend scaffolded and smoke-tested against real mbox data (2026-07-23):
   working (verified over a real websocket round trip).
 - `eslint.config.js` — flat config wired to `eslint-config-airbnb-extended`;
   `backend/` lints clean.
-- Not yet done: frontend (Observable Framework project not yet initialized —
-  see `frontend/`), and no full ingestion run against the real archive has
-  been performed yet (only a 2-file subset, to avoid a long first run and
-  large disk use without the user driving that step explicitly).
+- `npm run ingest` has been run against the full real archive (27 mbox
+  files, all `.sbd` subfolders included): **21,387 messages**, **6,409
+  attachments** (822 MB deduped on disk), spanning 2000–2026. Only 1
+  message has no parseable `date_utc` out of the whole set.
+- Fixed during that first full run: `mailparser`'s `from`/`to` fields come
+  back as an *array* of AddressObjects (not a single one) when a header
+  repeats — real in mail this old — and DuckDB's VARCHAR binder throws on
+  `undefined` (only accepts `string`/`null`). Fixed in `mboxParser.js`
+  (`addressText()` helper) plus a defensive `orNull()` normalization in
+  `runIngest.js`'s `insertMessage` so the next unforeseen field shape fails
+  soft instead of crashing the run. The crash-safety of the incremental
+  design held up as intended: the run resumed cleanly from the last
+  fully-committed file, no data loss or duplication.
+- Not yet done: frontend (Observable Framework project scaffolded in
+  `frontend/` but not yet visually verified — see below).
 
 ### Resolved open decisions (were flagged for Claude Code, now checked)
 
@@ -46,13 +57,12 @@ Backend scaffolded and smoke-tested against real mbox data (2026-07-23):
   chars) — not revisited since it's cheap and matches the plan; no need to
   reopen unless it becomes a problem.
 - Search: DuckDB `ILIKE` on `subject`/`body_text` is what's implemented.
-  Full-text index only worth adding if it's slow in practice on the real
-  ~1.3 GB archive — untested at that scale yet.
-- The full real archive has *not* been ingested yet. Some folders are large
-  (`Inbox` 631 MB, `AA` 182 MB, `Scholtens` 150 MB, `Casa` 117 MB,
-  `Proposals` 113 MB, `Hamlet` 103 MB) — first run will take a while and
-  will write many attachment blobs to disk. Run `npm run ingest` when ready
-  for that.
+  Full-text index only worth adding if it's slow in practice — untested at
+  query time on the real 21k-message archive yet (only ingest has been
+  exercised at that scale so far).
+- Frontend not yet visually verified end-to-end against the real data (see
+  "Frontend" section below) — the query logic itself has been, against both
+  a test subset and the full archive directly.
 
 ## Architecture (Gutenberg/Semantic split)
 

@@ -44,6 +44,16 @@ function unwrapEnvelope(rawMessage) {
   return Buffer.from(unescaped, 'latin1');
 }
 
+// mailparser returns a single AddressObject normally, but an array of them
+// when a header (e.g. "To") repeats — real in a 20+ year POP3 archive.
+function addressText(addressField) {
+  if (!addressField) return null;
+  if (Array.isArray(addressField)) {
+    return addressField.map((a) => a.text).join(', ') || null;
+  }
+  return addressField.text || null;
+}
+
 // Parses one raw mbox message (as produced by splitMboxMessages) into a
 // plain object matching the `messages` table shape, plus an `attachments`
 // array of { filename, contentType, size, content } for the caller to
@@ -65,8 +75,8 @@ async function parseMboxMessage({ mboxFile, offset, raw }) {
       dateUtc,
       year: dateUtc ? dateUtc.getUTCFullYear() : null,
       month: dateUtc ? dateUtc.getUTCMonth() + 1 : null,
-      fromAddr: parsed.from ? parsed.from.text : null,
-      toAddr: parsed.to ? parsed.to.text : null,
+      fromAddr: addressText(parsed.from),
+      toAddr: addressText(parsed.to),
       subject: parsed.subject || null,
       bodyText: parsed.text || null,
       bodyHtml: parsed.html || null,

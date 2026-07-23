@@ -28,6 +28,14 @@ const MESSAGE_TYPES = {
   hasAttachments: BOOLEAN,
 };
 
+// mailparser's output shape has surprised us once already (arrays where a
+// single AddressObject was expected); DuckDB's VARCHAR binder accepts
+// `string` or `null` but throws on `undefined`, so normalize defensively
+// here rather than trust every field stays a plain string forever.
+function orNull(value) {
+  return value === undefined ? null : value;
+}
+
 async function insertMessage(connection, message) {
   await connection.run(
     `INSERT INTO messages (
@@ -45,11 +53,11 @@ async function insertMessage(connection, message) {
       dateUtc: toTimestampParam(message.dateUtc),
       year: message.year,
       month: message.month,
-      fromAddr: message.fromAddr,
-      toAddr: message.toAddr,
-      subject: message.subject,
-      bodyText: message.bodyText,
-      bodyHtml: message.bodyHtml,
+      fromAddr: orNull(message.fromAddr),
+      toAddr: orNull(message.toAddr),
+      subject: orNull(message.subject),
+      bodyText: orNull(message.bodyText),
+      bodyHtml: orNull(message.bodyHtml),
       hasAttachments: message.hasAttachments,
     },
     MESSAGE_TYPES,
