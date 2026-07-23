@@ -32,8 +32,18 @@ Backend scaffolded and the full real archive has been ingested (2026-07-23):
   soft instead of crashing the run. The crash-safety of the incremental
   design held up as intended: the run resumed cleanly from the last
   fully-committed file, no data loss or duplication.
-- Not yet done: frontend (Observable Framework project scaffolded in
-  `frontend/` but not yet visually verified — see below).
+- Frontend (`frontend/src/index.md`) verified working in a real browser
+  against the full real archive: folder select, search box, and results
+  table all render and query correctly. One bug fixed to get there: an
+  explicit `import {Inputs} from "npm:@observablehq/inputs"` shadowed
+  Framework's automatically-injected `Inputs` global with something that
+  resolved to `undefined`, breaking every `Inputs.*` call. Framework
+  provides `Inputs` (and `d3`, `Plot`, etc.) to every cell without an
+  import — removed the import rather than fixing it. (Note: this session's
+  own sandboxed Browser pane tool can't composite frames, so Framework's
+  `requestAnimationFrame`-driven runtime never ticks there regardless of
+  page content — that's a tooling limitation of this session, unrelated to
+  the bug above, and doesn't affect a normal browser.)
 
 ### Resolved open decisions (were flagged for Claude Code, now checked)
 
@@ -60,9 +70,8 @@ Backend scaffolded and the full real archive has been ingested (2026-07-23):
   Full-text index only worth adding if it's slow in practice — untested at
   query time on the real 21k-message archive yet (only ingest has been
   exercised at that scale so far).
-- Frontend not yet visually verified end-to-end against the real data (see
-  "Frontend" section below) — the query logic itself has been, against both
-  a test subset and the full archive directly.
+- Message detail pane (click a row to load full body + attachments via
+  `messageById`) is the noted next step in `index.md` — not wired up yet.
 
 ## Architecture (Gutenberg/Semantic split)
 
@@ -190,15 +199,15 @@ Named queries implemented in `backend/queries.js`:
 
 ## Frontend
 
-Not yet started. Plan (unchanged from original):
+`frontend/src/index.md` implements and has verified working (real browser,
+full archive): a WebSocket connection opened on load, a folder select, a
+free-text search box, and a results table — all per the original plan
+below. Still open from the original plan:
 
-- Observable Framework page(s), static-built as usual, but instead of
-  fetching static Parquet from `dist/data/`, the page opens a WebSocket to
-  the backend on load.
-- Observable Inputs / Forms for the filter controls: date range, folder
-  select, free-text search box, attachment-only toggle.
-- Results table + a message detail pane (click a row → fetch full body via
-  `messageById`).
+- Date-range filter and attachment-only toggle inputs — `queries.js`'s
+  `messagesByDateRange` already accepts `from`/`to`, just not wired to an
+  Input yet.
+- Message detail pane (click a row → fetch full body via `messageById`).
 - Reuse the existing manifest-poll instinct from the Oracle project only if
   useful for "new mail ingested" notifications — otherwise skip it, since the
   websocket is already live and can push an `ingest_complete` event instead of
