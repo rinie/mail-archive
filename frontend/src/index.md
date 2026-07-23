@@ -1,10 +1,6 @@
 # Mail Archive
 
 ```js
-import {Inputs} from "npm:@observablehq/inputs";
-```
-
-```js
 const ws = new WebSocket("ws://localhost:8787");
 
 function query(name, params = {}) {
