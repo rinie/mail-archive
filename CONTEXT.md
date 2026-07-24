@@ -70,8 +70,22 @@ Backend scaffolded and the full real archive has been ingested (2026-07-23):
   Full-text index only worth adding if it's slow in practice — untested at
   query time on the real 21k-message archive yet (only ingest has been
   exercised at that scale so far).
-- Message detail pane (click a row to load full body + attachments via
-  `messageById`) is the noted next step in `index.md` — not wired up yet.
+- Message detail pane, date-range filter, and attachments-only toggle are
+  all wired up and confirmed working (see "Frontend" below). All items
+  from the original plan's frontend checklist are now done except the
+  optional ingest-notification reuse, which was explicitly "skip unless
+  useful."
+- `Mutable()` doesn't behave in Framework `.md` pages the way it does in
+  hand-authored Observable notebooks: notebooks' compiler special-cases
+  `name = Mutable(...)` cells to shadow the raw wrapper for `.value`
+  writes elsewhere; Framework's markdown compiler has no such handling
+  (confirmed by grepping its compiler source — only the client runtime
+  references `Mutable`). Its `Mutable()` is a genuine `async function*`
+  under the hood, so Observable Runtime's `generatorish()` duck-typing
+  auto-unwraps any cell exporting one into its live current value. Rule of
+  thumb for this codebase: use `x.value = ...` only inside the cell that
+  defines `const x = Mutable(...)`; every other cell reads the live value
+  as the bare name `x`, never `x.value`.
 
 ## Architecture (Gutenberg/Semantic split)
 
@@ -200,18 +214,22 @@ Named queries implemented in `backend/queries.js`:
 ## Frontend
 
 `frontend/src/index.md` implements and has verified working (real browser,
-full archive): a WebSocket connection opened on load, a folder select, a
-free-text search box, and a results table — all per the original plan
-below. Still open from the original plan:
+full archive) everything from the original plan except the optional
+ingest-notification item: a WebSocket connection opened on load, a folder
+select, a free-text search box, From/To date filters, an attachments-only
+toggle, a results table, and a message detail pane (click a row → full
+body + an attachments table via `messageById`).
 
-- Date-range filter and attachment-only toggle inputs — `queries.js`'s
-  `messagesByDateRange` already accepts `from`/`to`, just not wired to an
-  Input yet.
-- Message detail pane (click a row → fetch full body via `messageById`).
-- Reuse the existing manifest-poll instinct from the Oracle project only if
-  useful for "new mail ingested" notifications — otherwise skip it, since the
-  websocket is already live and can push an `ingest_complete` event instead of
-  polling.
+The results table and the detail pane's attachment list are hand-built
+HTML tables (`html` template literals), not `Inputs.table` — its
+checkbox-based single-selection didn't reliably update across row
+switches, so selection state is a `Mutable` set directly from each row's
+click handler instead (see the `Mutable` gotcha noted above).
+
+Not done, low priority: reusing the manifest-poll instinct from the Oracle
+project for "new mail ingested" notifications — was explicitly "skip
+unless useful," and the websocket already supports pushing an
+`ingest_complete` event instead of polling if this is ever wanted.
 
 ## Conventions to follow (standing preferences)
 
