@@ -1,4 +1,4 @@
-const { VARCHAR, TIMESTAMP } = require('@duckdb/node-api');
+const { VARCHAR, TIMESTAMP, BOOLEAN } = require('@duckdb/node-api');
 const { toTimestampParam } = require('./duckdbClient');
 
 // Named-query map: the only SQL the frontend can trigger. Client sends a
@@ -14,6 +14,7 @@ async function messagesByDateRange(connection, params) {
        AND ($folder IS NULL OR mbox_file = $folder)
        AND ($searchText IS NULL OR subject ILIKE '%' || $searchText || '%'
             OR body_text ILIKE '%' || $searchText || '%')
+       AND ($attachmentsOnly = false OR has_attachments = true)
      ORDER BY date_utc DESC
      LIMIT 500`,
     {
@@ -21,9 +22,14 @@ async function messagesByDateRange(connection, params) {
       toDate: toTimestampParam(params.to ? new Date(params.to) : null),
       folder: params.folder || null,
       searchText: params.searchText || null,
+      attachmentsOnly: Boolean(params.attachmentsOnly),
     },
     {
-      fromDate: TIMESTAMP, toDate: TIMESTAMP, folder: VARCHAR, searchText: VARCHAR,
+      fromDate: TIMESTAMP,
+      toDate: TIMESTAMP,
+      folder: VARCHAR,
+      searchText: VARCHAR,
+      attachmentsOnly: BOOLEAN,
     },
   );
   return reader.getRowObjectsJS();
