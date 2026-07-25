@@ -1,0 +1,8 @@
+node_modules/
+mail.duckdb
+mail.duckdb.wal
+attachments/
+backend/config.js
+*.log
+frontend/src/.observablehq/
+frontend/dist/
