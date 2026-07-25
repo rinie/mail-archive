@@ -21,8 +21,10 @@ Backend scaffolded and the full real archive has been ingested (2026-07-23):
   `backend/` lints clean.
 - `npm run ingest` has been run against the full real archive (27 mbox
   files, all `.sbd` subfolders included): **21,387 messages**, **6,409
-  attachments** (822 MB deduped on disk), spanning 2000–2026. Only 1
-  message has no parseable `date_utc` out of the whole set.
+  attachments** (822 MB deduped on disk), spanning 2000–2026. 2 messages
+  have no parseable `date_utc` (see the date-fallback bug below — one has
+  a genuinely ambiguous timezone abbreviation, one is missing a `Date:`
+  header entirely).
 - Fixed during that first full run: `mailparser`'s `from`/`to` fields come
   back as an *array* of AddressObjects (not a single one) when a header
   repeats — real in mail this old — and DuckDB's VARCHAR binder throws on
@@ -44,6 +46,30 @@ Backend scaffolded and the full real archive has been ingested (2026-07-23):
   `requestAnimationFrame`-driven runtime never ticks there regardless of
   page content — that's a tooling limitation of this session, unrelated to
   the bug above, and doesn't affect a normal browser.)
+- Message detail pane, date-range filter, and attachments-only toggle:
+  wired up and confirmed working. Results and attachments tables are
+  bounded to a max-height scrollable container (sticky header) instead of
+  growing unbounded. HTML-only messages render inside a sandboxed
+  `<iframe sandbox="" srcdoc=...>` — verified directly (real htl, real DOM)
+  that a script injected into `srcdoc` cannot execute or touch the parent
+  page, which matters given 20+ years of archived mail could contain old
+  malicious HTML. Remote images inside that frame are not blocked; doing
+  so would need an explicit CSP and wasn't asked for.
+- **Silent wrong-date bug, found and fixed**: `mailparser` returns
+  `new Date()` (parse time, not message time) for a `Date:` header it
+  can't parse, instead of failing — indistinguishable from a real date
+  unless you know to look for it. Caught because a 20+-year-old message's
+  Date header can never legitimately land within seconds of "whenever
+  ingest happened to run." Confirmed against a real header in this
+  archive: `"Tue, 10 Jul 2001 16:30:07 C -0500"` — a stray token from a
+  broken sender mailer, affecting multiple unrelated senders/gateways in
+  this archive identically. `mboxParser.js` now has two narrow,
+  independently-verified repairs (the stray-token pattern above, and
+  spelled-out US timezone names like "Pacific Daylight Time," which
+  resolve DST unambiguously by name); anything else stays `null` rather
+  than guessed. Applied retroactively to the already-ingested database via
+  a one-off targeted re-parse-and-`UPDATE` (not a full re-ingest) — see
+  git history for the fix scripts used, not kept in the repo.
 
 ### Resolved open decisions (were flagged for Claude Code, now checked)
 
