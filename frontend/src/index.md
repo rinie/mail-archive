@@ -74,24 +74,26 @@ const setSelectedId = (id) => { selectedId.value = id; };
 
 ```js
 display(
-  html`<table class="data-table">
-    <thead>
-      <tr><th>Date</th><th>From</th><th>Subject</th><th>📎</th></tr>
-    </thead>
-    <tbody>${messages.map((m) => html.fragment`<tr
-        style=${{
-          cursor: "pointer",
-          background: m.message_id === selectedId ? "var(--theme-foreground-fainter)" : "",
-        }}
-        onclick=${() => setSelectedId(m.message_id)}
-      >
-        <td>${m.date_utc ? new Date(m.date_utc).toLocaleString() : ""}</td>
-        <td>${m.from_addr || ""}</td>
-        <td>${m.subject || ""}</td>
-        <td>${m.has_attachments ? "📎" : ""}</td>
-      </tr>`)}
-    </tbody>
-  </table>`,
+  html`<div class="table-scroll" style="max-height: 420px;">
+    <table class="data-table">
+      <thead>
+        <tr><th>Date</th><th>From</th><th>Subject</th><th>📎</th></tr>
+      </thead>
+      <tbody>${messages.map((m) => html.fragment`<tr
+          style=${{
+            cursor: "pointer",
+            background: m.message_id === selectedId ? "var(--theme-foreground-fainter)" : "",
+          }}
+          onclick=${() => setSelectedId(m.message_id)}
+        >
+          <td>${m.date_utc ? new Date(m.date_utc).toLocaleString() : ""}</td>
+          <td>${m.from_addr || ""}</td>
+          <td>${m.subject || ""}</td>
+          <td>${m.has_attachments ? "📎" : ""}</td>
+        </tr>`)}
+      </tbody>
+    </table>
+  </div>`,
 );
 ```
 
@@ -112,29 +114,38 @@ display(
           <strong>Date:</strong> ${detail.date_utc ? new Date(detail.date_utc).toLocaleString() : "(unknown)"}
         </p>
         ${detail.attachments.length
-          ? html`<table class="data-table">
-              <thead><tr><th>Filename</th><th>Size</th></tr></thead>
-              <tbody>${detail.attachments.map((a) => html.fragment`<tr>
-                  <td>${a.filename || "(unnamed)"}</td>
-                  <td>${Math.round((a.size_bytes || 0) / 1024)} KB</td>
-                </tr>`)}
-              </tbody>
-            </table>`
+          ? html`<div class="table-scroll" style="max-height: 200px;">
+              <table class="data-table">
+                <thead><tr><th>Filename</th><th>Size</th></tr></thead>
+                <tbody>${detail.attachments.map((a) => html.fragment`<tr>
+                    <td>${a.filename || "(unnamed)"}</td>
+                    <td>${Math.round((a.size_bytes || 0) / 1024)} KB</td>
+                  </tr>`)}
+                </tbody>
+              </table>
+            </div>`
           : ""}
-        <pre style="white-space: pre-wrap; font-family: inherit;">${
-          detail.body_text || (detail.body_html ? "(HTML-only message — rendering raw HTML is not supported yet)" : "(no body)")
-        }</pre>
+        ${detail.body_html
+          ? html`<iframe sandbox="" style="width: 100%; height: 480px; border: 1px solid var(--theme-foreground-faint);" srcdoc=${detail.body_html}></iframe>`
+          : html`<pre style="white-space: pre-wrap; font-family: inherit;">${detail.body_text || "(no body)"}</pre>`}
       </div>`
     : html`<p><em>No message selected.</em></p>`,
 );
 ```
 
 <style>
+.table-scroll {
+  overflow-y: auto;
+  border: 1px solid var(--theme-foreground-faint);
+}
 .data-table {
   width: 100%;
   border-collapse: collapse;
 }
 .data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--theme-background);
   text-align: left;
   border-bottom: 1px solid var(--theme-foreground-faint);
   padding: 0.25rem 0.5rem;
