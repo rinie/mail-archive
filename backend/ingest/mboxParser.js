@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { simpleParser } = require('mailparser');
 
 const ESCAPED_FROM_LINE_RE = /^(>+)From /;
@@ -108,7 +109,13 @@ async function parseMboxMessage({ mboxFile, offset, raw }) {
   const parseStartedAt = Date.now();
   const parsed = await simpleParser(rfc822, { skipHtmlToText: true });
 
-  const messageId = parsed.messageId || `<${mboxFile}:${offset}@local-synthetic>`;
+  // A position-based synthetic id (mboxFile+offset) is unstable across any
+  // relocation (partitioning, or even a plain Thunderbird compaction) --
+  // confirmed by a real partition-run failure where these 4 messages'
+  // "identity" changed the moment they moved, breaking the primary-key
+  // invariant. Content is stable across moves; position is not.
+  const messageId = parsed.messageId
+    || `<${crypto.createHash('sha256').update(raw).digest('hex')}@local-synthetic>`;
 
   // mailparser silently falls back to `new Date()` for a Date header it
   // can't parse (confirmed against real mail in this archive with a
@@ -129,6 +136,7 @@ async function parseMboxMessage({ mboxFile, offset, raw }) {
       messageId,
       mboxFile,
       byteOffset: offset,
+      byteLength: raw.length,
       dateUtc,
       year: dateUtc ? dateUtc.getUTCFullYear() : null,
       month: dateUtc ? dateUtc.getUTCMonth() + 1 : null,
@@ -139,7 +147,12 @@ async function parseMboxMessage({ mboxFile, offset, raw }) {
       bodyHtml: parsed.html || null,
       hasAttachments: parsed.attachments.length > 0,
     },
-    attachments: parsed.attachments.map((att) => ({
+    // attachmentIndex is the 0-based ordinal into this array, stored
+    // alongside each attachment's metadata so on-demand retrieval can pick
+    // "the Nth attachment" unambiguously — two attachments on one message
+    // can share a filename.
+    attachments: parsed.attachments.map((att, attachmentIndex) => ({
+      attachmentIndex,
       filename: att.filename || null,
       contentType: att.contentType || null,
       size: att.size || att.content.length,
