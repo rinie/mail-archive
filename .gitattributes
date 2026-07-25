@@ -1,0 +1,7 @@
+# Force LF line endings for all text files in this repo, regardless of the
+# checking-out machine's core.autocrlf setting. Windows' autocrlf=true
+# default rewrites checked-out .js files to CRLF, which then fails
+# eslint-config-airbnb-extended's linebreak-style rule and makes git think
+# unmodified files are "changed" after any checkout/branch switch (blocking
+# `git checkout`, `gh pr merge`, etc. with phantom conflicts).
+* text=auto eol=lf
