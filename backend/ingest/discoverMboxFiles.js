@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SKIP_EXTENSIONS = new Set(['.msf', '.dat', '.html', '.json', '.log']);
+const SKIP_EXTENSIONS = new Set(['.msf', '.dat', '.html', '.json', '.log', '.csv']);
 
 function isCandidateMboxFile(entry, dirPath) {
   if (!entry.isFile()) return false;

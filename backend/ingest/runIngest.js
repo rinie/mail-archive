@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const path = require('node:path');
 const {
   VARCHAR, BIGINT, SMALLINT, TIMESTAMP, BOOLEAN,
 } = require('@duckdb/node-api');
@@ -11,12 +12,12 @@ const {
   setIngestState,
   needsCompactionFallback,
 } = require('./ingestState');
-const { writeAttachmentBlob } = require('./attachmentStore');
+const { upsertLocations } = require('./locationIndex');
+const { checkAndPartition } = require('./partitionMbox');
 
 const MESSAGE_TYPES = {
   messageId: VARCHAR,
   mboxFile: VARCHAR,
-  byteOffset: BIGINT,
   dateUtc: TIMESTAMP,
   year: SMALLINT,
   month: SMALLINT,
@@ -26,6 +27,14 @@ const MESSAGE_TYPES = {
   bodyText: VARCHAR,
   bodyHtml: VARCHAR,
   hasAttachments: BOOLEAN,
+};
+
+const ATTACHMENT_TYPES = {
+  messageId: VARCHAR,
+  attachmentIndex: SMALLINT,
+  filename: VARCHAR,
+  contentType: VARCHAR,
+  sizeBytes: BIGINT,
 };
 
 // mailparser's output shape has surprised us once already (arrays where a
@@ -39,17 +48,16 @@ function orNull(value) {
 async function insertMessage(connection, message) {
   await connection.run(
     `INSERT INTO messages (
-       message_id, mbox_file, byte_offset, date_utc, year, month,
+       message_id, mbox_file, date_utc, year, month,
        from_addr, to_addr, subject, body_text, body_html, has_attachments
      ) VALUES (
-       $messageId, $mboxFile, $byteOffset, $dateUtc, $year, $month,
+       $messageId, $mboxFile, $dateUtc, $year, $month,
        $fromAddr, $toAddr, $subject, $bodyText, $bodyHtml, $hasAttachments
      )
      ON CONFLICT (message_id) DO NOTHING`,
     {
       messageId: message.messageId,
       mboxFile: message.mboxFile,
-      byteOffset: message.byteOffset,
       dateUtc: toTimestampParam(message.dateUtc),
       year: message.year,
       month: message.month,
@@ -64,24 +72,18 @@ async function insertMessage(connection, message) {
   );
 }
 
-async function insertAttachment(connection, messageId, attachment, blobPath) {
+async function insertAttachment(connection, messageId, attachment) {
   await connection.run(
-    `INSERT INTO attachments (message_id, filename, content_type, size_bytes, blob_path)
-     VALUES ($messageId, $filename, $contentType, $sizeBytes, $blobPath)`,
+    `INSERT INTO attachments (message_id, attachment_index, filename, content_type, size_bytes)
+     VALUES ($messageId, $attachmentIndex, $filename, $contentType, $sizeBytes)`,
     {
       messageId,
+      attachmentIndex: attachment.attachmentIndex,
       filename: attachment.filename,
       contentType: attachment.contentType,
       sizeBytes: attachment.size,
-      blobPath,
     },
-    {
-      messageId: VARCHAR,
-      filename: VARCHAR,
-      contentType: VARCHAR,
-      sizeBytes: BIGINT,
-      blobPath: VARCHAR,
-    },
+    ATTACHMENT_TYPES,
   );
 }
 
@@ -97,7 +99,7 @@ function readTail(mboxPath, startOffset, currentSize) {
   return buffer;
 }
 
-async function ingestOneFile(connection, mboxPath, attachmentsDir) {
+async function ingestOneFile(connection, mboxPath) {
   const currentSize = fs.statSync(mboxPath).size;
   if (currentSize === 0) return { parsed: 0, fallback: false };
 
@@ -111,6 +113,11 @@ async function ingestOneFile(connection, mboxPath, attachmentsDir) {
 
   const buffer = readTail(mboxPath, startOffset, currentSize);
   const rawMessages = splitMboxMessages(buffer, startOffset);
+
+  // Location entries are collected here and flushed once at the end (see
+  // upsertLocations) rather than written per message -- a per-message
+  // shard rewrite would be O(n^2) for a file with many new messages.
+  const locationEntries = [];
 
   // Sequential on purpose: keeps memory bounded (one message decoded/
   // written at a time) and preserves file order for easier debugging.
@@ -127,13 +134,27 @@ async function ingestOneFile(connection, mboxPath, attachmentsDir) {
     // eslint-disable-next-line no-await-in-loop
     await insertMessage(connection, message);
 
+    // Upserted unconditionally, regardless of whether insertMessage's own
+    // INSERT was a no-op on conflict: this is what closes the latent
+    // stale-location bug (see CONTEXT.md) -- a message re-encountered
+    // during a full rescan (compaction fallback or a partition rewrite)
+    // always gets its current, real location recorded, never silently
+    // skipped.
+    locationEntries.push({
+      messageId: message.messageId,
+      byteOffset: message.byteOffset,
+      byteLength: message.byteLength,
+    });
+
     for (let j = 0; j < attachments.length; j += 1) {
-      const attachment = attachments[j];
-      const blobPath = writeAttachmentBlob(attachmentsDir, attachment.content);
       // eslint-disable-next-line no-await-in-loop
-      await insertAttachment(connection, message.messageId, attachment, blobPath);
+      await insertAttachment(connection, message.messageId, attachments[j]);
     }
     parsedCount += 1;
+  }
+
+  if (locationEntries.length > 0) {
+    upsertLocations(mboxPath, locationEntries);
   }
 
   await setIngestState(connection, mboxPath, {
@@ -153,17 +174,75 @@ async function runIngest() {
   for (let i = 0; i < mboxFiles.length; i += 1) {
     const mboxPath = mboxFiles[i];
     // eslint-disable-next-line no-await-in-loop
-    const result = await ingestOneFile(connection, mboxPath, config.attachmentsDir);
+    const result = await ingestOneFile(connection, mboxPath);
     const note = result.fallback ? ' (compaction fallback: full rescan)' : '';
     console.log(`${mboxPath}: parsed ${result.parsed} new message(s)${note}`);
   }
 }
 
-if (require.main === module) {
-  runIngest().catch((err) => {
-    console.error(err);
-    process.exitCode = 1;
-  });
+// Folders eligible for dynamic partitioning once they cross the size
+// threshold (see partitionMbox.js). Starts with just Inbox -- the one that
+// actually grows forever from live POP3 delivery.
+const LIVE_FOLDERS = ['Inbox'];
+
+async function applyPartitionResult(connection, result) {
+  const updateTypes = { messageId: VARCHAR, mboxFile: VARCHAR };
+  for (let i = 0; i < result.mboxFileUpdates.length; i += 1) {
+    const { messageId, mboxFile } = result.mboxFileUpdates[i];
+    // eslint-disable-next-line no-await-in-loop
+    await connection.run(
+      'UPDATE messages SET mbox_file = $mboxFile WHERE message_id = $messageId',
+      { messageId, mboxFile },
+      updateTypes,
+    );
+  }
+
+  for (let i = 0; i < result.newIngestState.length; i += 1) {
+    const { mboxFile, newSize } = result.newIngestState[i];
+    // eslint-disable-next-line no-await-in-loop
+    await setIngestState(connection, mboxFile, { lastOffset: newSize, fileSizeAtRun: newSize });
+  }
 }
 
-module.exports = { runIngest };
+// Partitioning is deliberately NOT called from the exported runIngest()
+// above -- server.js also calls that over the websocket while serving
+// live queries, and a partition rewrite racing against in-flight queries
+// resolving message locations would be a real hazard. This only runs from
+// the CLI entry point below (`node runIngest.js` / `npm run ingest`).
+async function runPartitioning(connection, { dryRun } = {}) {
+  for (let i = 0; i < LIVE_FOLDERS.length; i += 1) {
+    const mboxPath = path.join(config.mailRootDir, LIVE_FOLDERS[i]);
+    const paths = {
+      manifestPath: config.manifestPath,
+      backupDir: config.partitionBackupDir,
+      journalDir: config.partitionJournalDir,
+    };
+    // eslint-disable-next-line no-await-in-loop
+    const result = await checkAndPartition(mboxPath, config.profileDir, paths, { dryRun });
+
+    if (result.partitioned) {
+      // eslint-disable-next-line no-await-in-loop
+      await applyPartitionResult(connection, result);
+      console.log(`Partitioned ${mboxPath}.`);
+    } else if (result.dryRun) {
+      console.log(`[dry run] ${mboxPath}: would partition (see plan above).`);
+    } else {
+      console.log(`${mboxPath}: not partitioned (${result.reason}).`);
+    }
+  }
+}
+
+if (require.main === module) {
+  const dryRun = process.argv.includes('--dry-run');
+  runIngest()
+    .then(async () => {
+      const connection = await getConnection(config.dbPath);
+      await runPartitioning(connection, { dryRun });
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exitCode = 1;
+    });
+}
+
+module.exports = { runIngest, ingestOneFile };

@@ -1,8 +1,13 @@
 node_modules/
 mail.duckdb
 mail.duckdb.wal
+mail.duckdb.pre-*
 attachments/
+locations/
+partition_backups/
+partition_runs/
 backend/config.js
+backend/partition_manifest.csv
 *.log
 frontend/src/.observablehq/
 frontend/dist/

@@ -4,7 +4,6 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS messages (
   message_id   VARCHAR PRIMARY KEY,
   mbox_file    VARCHAR NOT NULL,
-  byte_offset  BIGINT NOT NULL,
   date_utc     TIMESTAMP,
   year         SMALLINT,
   month        TINYINT,
@@ -16,12 +15,18 @@ CREATE TABLE IF NOT EXISTS messages (
   has_attachments BOOLEAN DEFAULT false
 );
 
+-- No REFERENCES messages(message_id): DuckDB blocks ALTER TABLE ... DROP
+-- COLUMN on a table with dependent foreign keys, which would otherwise
+-- block future schema changes (this migration's own messages.byte_offset
+-- drop hit exactly that). message_id consistency is maintained by the
+-- application code (insertMessage/insertAttachment always agree), not the
+-- database.
 CREATE TABLE IF NOT EXISTS attachments (
-  message_id   VARCHAR NOT NULL REFERENCES messages(message_id),
-  filename     VARCHAR,
-  content_type VARCHAR,
-  size_bytes   BIGINT,
-  blob_path    VARCHAR
+  message_id       VARCHAR NOT NULL,
+  attachment_index SMALLINT NOT NULL,
+  filename         VARCHAR,
+  content_type     VARCHAR,
+  size_bytes       BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS ingest_state (
