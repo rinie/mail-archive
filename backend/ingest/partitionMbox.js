@@ -3,6 +3,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { splitMboxMessages, parseMboxMessage } = require('./mboxParser');
 const { upsertLocations } = require('./locationIndex');
+const { appendManifestRow } = require('./partitionManifest');
 
 // Moves messages dated to a fully-closed past calendar year out of a live,
 // growing mbox file (e.g. Inbox) into per-year Inbox.sbd/archive-<year>
@@ -109,19 +110,6 @@ function classify(entries, currentYear) {
 
 function concatRaw(entries) {
   return Buffer.concat(entries.map((entry) => entry.raw));
-}
-
-// ---- Manifest (logical folder identity for partition shards) ----
-
-function appendManifestRow(manifestPath, physicalPath, logicalFolder) {
-  const escaped = (value) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
-  const exists = fs.existsSync(manifestPath);
-  const line = `${escaped(physicalPath)},${escaped(logicalFolder)}\n`;
-  if (!exists) {
-    fs.writeFileSync(manifestPath, `physical_path,logical_folder\n${line}`, 'utf8');
-  } else {
-    fs.appendFileSync(manifestPath, line, 'utf8');
-  }
 }
 
 // ---- The partition operation for one live folder ----
@@ -302,6 +290,10 @@ async function checkAndPartition(mboxPath, profileDir, paths, { dryRun = false }
 module.exports = {
   SIZE_THRESHOLD_BYTES,
   assertThunderbirdNotRunning,
+  scanAndParse,
+  messageIdSet,
+  setsEqual,
+  concatRaw,
   planPartition,
   logPlan,
   executePartition,

@@ -148,6 +148,14 @@ function getLocation(mboxFile, messageId) {
   return readLocations(mboxFile).get(messageId) || null;
 }
 
+// Deletes a mbox file's location shard entirely -- for when the mbox file
+// itself stops existing (e.g. unpartitionMbox.js merging an archive file's
+// content into another file and removing the now-empty original).
+function deleteShard(mboxFile) {
+  const shardPath = shardPathFor(mboxFile);
+  fs.rmSync(shardPath, { force: true });
+}
+
 module.exports = {
-  shardPathFor, readLocations, upsertLocations, renameLocation, getLocation,
+  shardPathFor, readLocations, upsertLocations, renameLocation, getLocation, deleteShard,
 };
