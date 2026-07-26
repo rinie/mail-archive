@@ -246,6 +246,51 @@ partition operation was run against the copy end-to-end. Verified:
 **Still open**: get explicit user confirmation, then run the real
 (non-dry-run) partition against the actual live `Inbox` — not yet done.
 
+### Reversibility: `unpartitionMbox.js`
+
+The user asked, before committing to partitioning the real live `Inbox`,
+whether the operation could be undone later. It can: since each
+`archive-<year>` file is just a byte-exact concatenation of raw mbox
+messages (produced by `concatRaw`), merging them back into one file is
+valid by construction — no different from any other multi-file mbox
+concatenation. `backend/ingest/unpartitionMbox.js` implements the inverse
+of `partitionMbox.js`'s `executePartition`, reusing its exported primitives
+(`assertThunderbirdNotRunning`, `scanAndParse`, `messageIdSet`, `setsEqual`,
+`concatRaw`) and the same discipline: backup every file first, write to a
+`.tmp` sibling, independently re-scan and confirm the merged message-id set
+exactly equals the union of every source file's set, write a rename
+journal, rename into place, update the location shard, and only *then*
+delete the now-merged archive files, their location shards, their
+`partition_manifest.csv` rows, and (if now empty) the `.sbd` directory.
+
+Manifest handling (`readManifestRows`/`removeManifestRows`/
+`appendManifestRow`) was extracted into `backend/ingest/partitionManifest.js`,
+shared by both directions. `locationIndex.js` gained `deleteShard()` and
+`ingestState.js` gained `deleteIngestState()` for cleaning up files that
+stop existing after a merge.
+
+This is a **manual, user-invoked** operation with no automatic trigger (the
+inverse of "too big, partition" isn't "too small, merge" — there's no size
+threshold). It only runs via its own CLI entry point
+(`node backend/ingest/unpartitionMbox.js [--dry-run]` /
+`npm run unpartition`), never from `runIngest.js` or any automatic flow.
+
+**Verified via a three-way round-trip test**, entirely on scratch copies,
+never touching the real live `Inbox`: a fresh `original` copy of the real
+profile, a `partitioned` copy (real partition run against it), and a
+`restored` copy (real unpartition run against the partitioned copy).
+Result: `restored`'s `Inbox` was confirmed a **byte-exact round trip** of
+`original`'s — identical file size (632,365,956 bytes), identical unique
+message-id sets (4,484), identical physical message counts including
+duplicates (4,490), and zero SHA-256 hash mismatches across every single
+message. Manifest, archive files, their location shards, their
+`ingest_state` rows, and the now-empty `.sbd` directory were all correctly
+cleaned up. On-demand retrieval spot-checked against the restored file
+afterward, all correct. Message order within the restored file differs
+from the original (partition/unpartition don't preserve original delivery
+order — archived years are merged back oldest-first, then the live file's
+own content last), which is expected and immaterial to mbox validity.
+
 ### Still open
 
 - Search: DuckDB `ILIKE` on `subject`/`body_text` is what's implemented.
@@ -457,6 +502,8 @@ mail-archive/
       locationIndex.js       # per-mbox-file location shards (source of truth)
       messageLocator.js      # on-demand retrieval by byte range
       partitionMbox.js        # moves closed-year mail out of live Inbox
+      partitionManifest.js    # physical archive file <-> logical folder CSV
+      unpartitionMbox.js      # inverse of partitionMbox.js (manual, own CLI)
       runIngest.js            # CLI entry point (ingest, then partition)
   locations/                 # gitignored — location shards (regenerable)
   partition_backups/         # gitignored — pre-partition backups

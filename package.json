@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "ingest": "node backend/ingest/runIngest.js",
+    "unpartition": "node backend/ingest/unpartitionMbox.js",
     "server": "node backend/server.js",
     "lint": "eslint ."
   },

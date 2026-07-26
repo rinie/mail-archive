@@ -28,6 +28,12 @@ async function setIngestState(connection, mboxPath, { lastOffset, fileSizeAtRun 
   );
 }
 
+// Removes a file's ingest_state row entirely -- for when the mbox file
+// itself stops existing (unpartitionMbox.js merging an archive file away).
+async function deleteIngestState(connection, mboxPath) {
+  await connection.run('DELETE FROM ingest_state WHERE mbox_path = $mboxPath', { mboxPath });
+}
+
 // Peeks the byte at `offset` to confirm it starts a "From " envelope line,
 // as splitMboxMessages would expect for a tail read starting there.
 function peekStartsFromLine(mboxPath, offset, currentSize) {
@@ -54,4 +60,6 @@ function needsCompactionFallback(mboxPath, state) {
   return false;
 }
 
-module.exports = { getIngestState, setIngestState, needsCompactionFallback };
+module.exports = {
+  getIngestState, setIngestState, deleteIngestState, needsCompactionFallback,
+};
